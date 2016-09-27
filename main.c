@@ -1,41 +1,51 @@
 #include "driverlib.h"
+#include "math.h"
 
 void main_freq_config (void);
 void gpio_config (void);
 void timersA_init (void);
 void wait_us (uint16_t us_val);
+void delay_ms(unsigned int ms);
 void ADC_init (void);
 void UART_Init(void);
 void UART_send(uint16_t symbol);
 
 uint16_t ADC_measure (uint8_t channel);
-volatile uint16_t a, b, a0, b0; 			// mes1, mes2, initial values
-uint16_t i; 								// "FIRE" signal number
+volatile uint16_t a, b, a0, b0; 		// mes1, mes2, initial values
+uint16_t i0 = 0, i1 = 0; 										// "FIRE" signal number
 
-const double c0 = 1.5;						// magic numbers
-const uint16_t fire_condition = 3;
+const double c0 = 1.5;								// magic numbers
+const double c1 = 2.4;								// magic numbers
+const uint16_t i0_condition = 10;
+const uint16_t i1_condition = 40;
+const uint16_t delta_a_treshold = 30;
+const uint16_t delta2_b_treshold = 4;
+const double delta_c0 = 0.1;
+const double delta_c1 = 0.2;
+double c_prev = 0;
+
 
 void main(void) {
+
     WDTCTL = WDTPW | WDTHOLD;						// Stop watchdog timer
 	main_freq_config();
 	gpio_config();
 
 	timersA_init ();
-	wait_us(1000);
+	wait_us(10000);
 	ADC_init ();
-
-	P3OUT |= BIT2; 								//start emitter
+	delay_ms(1000);
+	P3OUT |= BIT2; 									//start emitter
 	wait_us(20);
 
-	a0 = ADC_measure(ADC10_B_INPUT_A6);	//it is PHAMP
-	b0 = ADC_measure(ADC10_B_INPUT_A4); 	//it is PHAMP1
+	a0 = ADC_measure(ADC10_B_INPUT_A6);				//it is PHAMP
+	b0 = ADC_measure(ADC10_B_INPUT_A4); 			//it is PHAMP1
 
-	P3OUT &= ~(BIT2); 							//shut down IRLED
-
+	P3OUT &= ~(BIT2); 								//shut down IRLED
 
 	UART_Init();
 
-	P1OUT = BIT5;
+	//P1OUT = BIT5;
 
 	__bis_SR_register(GIE);
 
@@ -58,22 +68,22 @@ void main_freq_config (void)
 
 void gpio_config (void)
 {
-	P1DIR = BIT5 | BIT1; 					//LED heartbeat
+	P1DIR = BIT5 | BIT1; 								//LED heartbeat
 	P1OUT = 0;
-	P3DIR = BIT2 | BIT4 | BIT3; 			//EMITTER, PHAMPEN, PAMPEN1
+	P3DIR = BIT2 | BIT4 | BIT3; 						//EMITTER, PHAMPEN, PAMPEN1
 	P3OUT = 0;
-	P3OUT |= (BIT4 | BIT3); 				//start OP warming
+	P3OUT |= (BIT4 | BIT3); 							//start OP warming
 
 }
 
 void timersA_init(void)
 {
-	//ONE SECOND TIMER - slow
+	//THREE SECOND TIMER - slow
 	struct Timer_A_initUpModeParam TIMERA0_init_str =
 	{
 		TIMER_A_CLOCKSOURCE_ACLK,
 		TIMER_A_CLOCKSOURCE_DIVIDER_1,
-		8299,
+		829,
 		TIMER_A_TAIE_INTERRUPT_DISABLE,
 	    TIMER_A_CCIE_CCR0_INTERRUPT_ENABLE,
 		TIMER_A_SKIP_CLEAR,
@@ -100,25 +110,44 @@ void timersA_init(void)
 __interrupt void TIMER0_A0_ISR_HOOK(void)
 {
 	//EVERY ONE SECOND DO
-	uint16_t delta_a, delta_b;
-	double c;
+	int16_t delta_a, delta_b;
+	double c, delta_c;
 
-	P3OUT |= BIT2; 								//start emitter
+	P3OUT |= BIT2; 										//start emitter
 	wait_us(20);
 
-	a = ADC_measure(ADC10_B_INPUT_A6);	//it is PHAMP
-	b = ADC_measure(ADC10_B_INPUT_A4); 	//it is PHAMP1
+	a = ADC_measure(ADC10_B_INPUT_A6);					//it is PHAMP
+	b = ADC_measure(ADC10_B_INPUT_A4); 					//it is PHAMP1
 
-	P3OUT &= ~(BIT2); 							//shut down IRLED
+	P3OUT &= ~(BIT2); 									//shut down IRLED
 
 	delta_a = a - a0;
 	delta_b = b - b0;
-	c = delta_a / delta_b;
 
-	if (c > c0)
-		i++;
-	if (i == fire_condition)
-		P1OUT |= BIT5;				//FIRE!!!
+	if (delta_a < 0 && delta_b < 0) {
+		if (abs(delta_a) > delta_a_treshold) {
+			c = delta_a/(delta_b + 0.00001);
+			if ((c > c0) && (c < c1)) {
+				delta_c = c - c_prev;
+				if (delta_c < 0)
+					delta_c *= -1;
+				if (delta_c < delta_c0)
+					i0++;
+				else if ((delta_c >= delta_c0) && (delta_c < delta_c1)) {
+					i1 = i0 + i1;
+					i0 = 0;
+					i1++;
+				}
+				else {
+					i0 = 0;
+					i1 = 0;
+				}
+			}
+			c_prev = c;
+			if (i0 == i0_condition || i1 == i1_condition)
+				P1OUT |= BIT5;									//FIRE!!!
+		}
+	}
 
 	//send values out over UART
 	UART_send (a >> 8);
@@ -131,8 +160,6 @@ __interrupt void TIMER0_A0_ISR_HOOK(void)
 	UART_send (a & 0xFF);
 	UART_send (b >> 8);
 	UART_send (b & 0xFF);
-
-
 }
 
 void wait_us (uint16_t us_val)
@@ -143,6 +170,15 @@ void wait_us (uint16_t us_val)
 	Timer_A_startCounter(TIMER_A1_BASE, TIMER_A_CONTINUOUS_MODE);
 	while (TA1R < tacts_to_wait);
 	Timer_A_stop(TIMER_A1_BASE);
+}
+
+void delay_ms(unsigned int ms)
+{
+	while (ms)
+	{
+		__delay_cycles(8000);
+		ms--;
+	}
 }
 
 void ADC_init (void)
