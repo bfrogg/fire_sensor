@@ -1,5 +1,7 @@
 #include "driverlib.h"
-#include "math.h"
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 void main_freq_config (void);
 void gpio_config (void);
@@ -8,11 +10,12 @@ void wait_us (uint16_t us_val);
 void delay_ms(unsigned int ms);
 void ADC_init (void);
 void UART_Init(void);
-void UART_send(uint16_t symbol);
+void UART_send(uint8_t symbol);
+char* itoa(int i, char b[]);
 
 uint16_t ADC_measure (uint8_t channel);
 volatile uint16_t a, b, a0, b0; 		// mes1, mes2, initial values
-uint16_t i0 = 0, i1 = 0; 										// "FIRE" signal number
+uint16_t i0 = 0, i1 = 0; 				// "FIRE" signal number
 
 const double c0 = 1.5;								// magic numbers
 const double c1 = 2.4;								// magic numbers
@@ -24,7 +27,25 @@ const double delta_c0 = 0.1;
 const double delta_c1 = 0.2;
 double c_prev = 0;
 
-
+char* itoa(int i, char b[]) {
+    char const digit[] = "0123456789";
+    char* p = b;
+    if(i<0){
+        *p++ = '-';
+        i *= -1;
+    }
+    int shifter = i;
+    do { //Move to where representation ends
+        ++p;
+        shifter = shifter/10;
+    } while(shifter);
+    *p = '\0';
+    do { //Move back, inserting digits as u go
+        *--p = digit[i%10];
+        i = i/10;
+    } while(i);
+    return b;
+}
 void main(void) {
 
     WDTCTL = WDTPW | WDTHOLD;						// Stop watchdog timer
@@ -150,16 +171,15 @@ __interrupt void TIMER0_A0_ISR_HOOK(void)
 	}
 
 	//send values out over UART
-	UART_send (a >> 8);
-	UART_send (a & 0xFF);
-	UART_send (b >> 8);
-	UART_send (b & 0xFF);
-
-	//double it
-	UART_send (a >> 8 );
-	UART_send (a & 0xFF);
-	UART_send (b >> 8);
-	UART_send (b & 0xFF);
+	char buf1[5], buf2[5];
+	char* a_ptr = itoa(a, buf1);
+	char* b_ptr = itoa(b, buf2);
+	char* msg = strncat(strncat(strncat(a_ptr, ",", 1), b_ptr, strlen(b_ptr)), "\n", 1);    // данные будут в формате A,B\n
+	int l = strlen(msg);
+	int j;
+	for (j = 0; j < l; j++) {
+	  UART_send(*msg++);
+	}
 }
 
 void wait_us (uint16_t us_val)
@@ -235,7 +255,7 @@ void UART_Init(void)
     EUSCI_A_UART_disableInterrupt(EUSCI_A0_BASE, EUSCI_A_UART_RECEIVE_INTERRUPT);   	 /* disable eUSCI UART receive interrupt */
 }
 
-void UART_send(uint16_t symbol)
+void UART_send(uint8_t symbol)
 {
 	//do not forget SWITCHING PIN FOR MAX485
 
