@@ -1,31 +1,3 @@
-
-Skip to content
-This repository
-
-    Pull requests
-    Issues
-    Gist
-
-    @bfrogg
-
-1
-0
-
-    0
-
-bfrogg/fire_sensor
-Code
-Issues 0
-Pull requests 0
-Projects 0
-Wiki
-Pulse
-Graphs
-Settings
-fire_sensor/main.c
-ad8d49a 22 days ago
-@bfrogg bfrogg Added 2-order algorithm
-245 lines (201 sloc) 7.16 KB
 #include "driverlib.h"
 #include "math.h"
 
@@ -269,8 +241,3 @@ void UART_send(uint16_t symbol)
 	EUSCI_A_UART_transmitData (EUSCI_A0_BASE, symbol);
 	wait_us(550);
 }
-
-    Contact GitHub API Training Shop Blog About 
-
-    © 2016 GitHub, Inc. Terms Privacy Security Status Help 
-
